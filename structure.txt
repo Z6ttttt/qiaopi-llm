@@ -1,0 +1,63 @@
+D:\侨批仿写\
+│
+├── app.py                         # 最终总入口：用户输入 → JSON → 图片
+│
+├── configs\
+│   ├── model_config.yaml           # 模型路径、推理参数
+│   ├── train_qwen25_7b_lora.yaml   # 后续 LoRA/QLoRA 训练配置
+│   └── schema.json                 # 最终输出 JSON Schema
+│
+├── data\
+│   ├── raw\
+│   │   ├── qiaopi_cases.jsonl      # 完整侨批案例，母数据
+│   │   ├── user_queries.jsonl      # 用户输入变体
+│   │   ├── rewrite_pairs.jsonl     # 现代话 → 侨批风格
+│   │   └── cover_rules.json        # 封面规则模板
+│   │
+│   ├── processed\
+│   │   ├── train.jsonl             # 转换后的 SFT 训练集
+│   │   ├── val.jsonl
+│   │   └── test.jsonl
+│   │
+│   └── examples\
+│       └── demo_cases.jsonl
+│
+├── knowledge\
+│   ├── place_alias.json            # 地名旧称表
+│   ├── role_alias.json             # 身份称谓旧称表
+│   └── amount_alias.json           # 金额表达，可后续补
+│
+├── models\
+│   ├── qwen_client.py              # Qwen 推理封装
+│   └── prompts.py                  # Prompt 模板
+│
+├── pipeline\
+│   ├── extractor.py                # 用户输入 → 现代 metadata
+│   ├── completer.py                # 缺失字段判断/默认补全
+│   ├── normalizer.py               # 查知识库，现代词 → 旧称候选
+│   ├── generator.py                # metadata → 完整侨批 JSON
+│   ├── validator.py                # JSON 校验/修复
+│   └── paginator.py                # 正文分页，最后一页署名日期
+│
+├── renderer\
+│   ├── cover_renderer.py           # 你已经写好的封面渲染代码
+│   ├── body_renderer.py            # 正文渲染代码
+│   └── handwriting.py              # 伪手写通用函数
+│
+├── scripts\
+│   ├── download_model.ps1          # Windows 下载模型脚本
+│   ├── test_infer.py               # 测试模型推理
+│   ├── build_sft_dataset.py        # 母数据 → SFT jsonl
+│   └── train_lora.sh               # 后续 Linux/服务器训练脚本
+│
+├── templates\
+│   ├── cover\
+│   └── body\
+│       └── 正文模板.png
+│
+├── outputs\
+│   ├── json\
+│   └── images\
+│
+└── lora_outputs\
+    └── qwen25_7b_qiaopi_lora\

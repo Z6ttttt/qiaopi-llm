@@ -1,0 +1,21 @@
+# 大模型和数据文件（绝对不要上传）
+/data/
+/models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+
+# VSCode 配置和日志
+.vscode/
+*.log
+outputs/

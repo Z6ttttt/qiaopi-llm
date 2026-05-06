@@ -1,0 +1,28 @@
+source /data/luozetong/miniconda3/etc/profile.d/conda.sh
+conda activate qiaopi-llm
+
+
+export PS1='\w $ '
+
+
+
+gpustat -i
+
+(qiaopi-llm) ~ $ ls -lh /data/luozetong/models/Qwen2.5-7B-Instruct
+total 15G
+-rw-r--r-- 1 luozetong root  663 May  1 01:15 config.json
+-rw-r--r-- 1 luozetong root  243 May  1 01:15 generation_config.json
+-rw-r--r-- 1 luozetong root  12K May  1 01:15 LICENSE
+-rw-r--r-- 1 luozetong root 1.6M May  1 01:15 merges.txt
+-rw-r--r-- 1 luozetong root 3.7G May  1 01:18 model-00001-of-00004.safetensors
+-rw-r--r-- 1 luozetong root 3.6G May  1 01:19 model-00002-of-00004.safetensors
+-rw-r--r-- 1 luozetong root 3.6G May  1 01:17 model-00003-of-00004.safetensors
+-rw-r--r-- 1 luozetong root 3.4G May  1 01:19 model-00004-of-00004.safetensors
+-rw-r--r-- 1 luozetong root  28K May  1 01:15 model.safetensors.index.json
+-rw-r--r-- 1 luozetong root 6.1K May  1 01:15 README.md
+-rw-r--r-- 1 luozetong root 7.2K May  1 01:15 tokenizer_config.json
+-rw-r--r-- 1 luozetong root 6.8M May  1 01:15 tokenizer.json
+-rw-r--r-- 1 luozetong root 2.7M May  1 01:15 vocab.json
+
+
+PYTHONPATH=. python pipeline/generator.py
