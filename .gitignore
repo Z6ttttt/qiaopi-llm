@@ -39,3 +39,10 @@ data/*.zip
 .DS_Store
 .vscode/
 .idea/
+
+# local/generated datasets
+data/processed_v2_relation/
+data/*.xlsx
+
+# fonts may have redistribution/license restrictions
+fonts/
