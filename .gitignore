@@ -1,21 +1,41 @@
-# 大模型和数据文件（绝对不要上传）
-/data/
-/models/
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Environments
+.env
+.venv/
+venv/
+conda-meta/
+
+# Training outputs and model weights
+outputs/
 *.safetensors
 *.bin
 *.pt
 *.pth
+*.ckpt
 
-# Python 缓存
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.env
-.venv/
-venv/
-
-# VSCode 配置和日志
-.vscode/
+# Local generated files
+*.bak_v3_patch
+*.bak_text_convert
 *.log
-outputs/
+
+# Optional large/intermediate data
+data/processed/
+data/processed_v2_relation/*.jsonl
+data/processed_v2_relation/qiaopi_dataset_v2_relation_clean_cases.json
+data/processed_v2_relation/qiaopi_dataset_v2_relation_clean_cases.jsonl
+data/*.zip
+
+# Keep lightweight data docs if needed
+!data/processed_v2_relation/README.md
+!data/processed_v2_relation/summary.json
+!data/processed_v2_relation/cleaning_report.json
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

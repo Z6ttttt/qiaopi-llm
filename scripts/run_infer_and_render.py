@@ -41,7 +41,7 @@ from pipeline.render_text import render_body
 
 
 DEFAULT_BASE_MODEL = "/data/luozetong/models/Qwen2.5-7B-Instruct"
-DEFAULT_ADAPTER = "outputs/qwen25-7b-qiaopi-qlora-v2/final_adapter"
+DEFAULT_ADAPTER = "outputs/qwen25-7b-qiaopi-qlora-v3/final_adapter"
 DEFAULT_COVER_TEMPLATE = "data/cover_template.png"
 DEFAULT_TEXT_TEMPLATE = "data/text_template.png"
 DEFAULT_FONT = "fonts/MasaFont-Regular.ttf"

@@ -109,7 +109,13 @@ def has_any(text: str, keywords: List[str]) -> bool:
 
 
 def should_ask_clarification(user_query: str) -> bool:
-    """规则前置判断：明显信息不足时直接追问。"""
+    """规则前置判断：明显信息不足时直接追问。
+
+    v3 规则：
+    - 完全没有地点时，一律追问。因为封面和正文都依赖寄出地/收批地，
+      不能让模型自由补成“新加坡/汕头”。
+    - 有地点、收件人、主题中的大部分信息时，允许模型默认补姓名/金额。
+    """
     q = norm_text(user_query)
 
     if not q:
@@ -126,10 +132,12 @@ def should_ask_clarification(user_query: str) -> bool:
         "我想要一封侨批",
         "写个侨批",
         "帮我写侨批",
+        "请帮我写一封侨批",
+        "请生成一封侨批",
     }
 
-    q_no_punc = re.sub(r"[。！!？?\s]", "", q)
-    vague_no_punc = {re.sub(r"[。！!？?\s]", "", x) for x in vague_exact}
+    q_no_punc = re.sub(r"[。！!？?，,\s]", "", q)
+    vague_no_punc = {re.sub(r"[。！!？?，,\s]", "", x) for x in vague_exact}
 
     if q_no_punc in vague_no_punc:
         return True
@@ -137,6 +145,12 @@ def should_ask_clarification(user_query: str) -> bool:
     has_place = has_any(q, PLACE_KEYWORDS)
     has_receiver = has_any(q, RECEIVER_KEYWORDS)
     has_theme = has_any(q, THEME_KEYWORDS)
+
+    # v3 新增：完全没有地点时直接追问。
+    # 例如：“帮我写一封给母亲的侨批，内容是报平安和寄家用。”
+    # 不能让模型自动补新加坡/汕头。
+    if not has_place:
+        return True
 
     # 太短且缺核心信息
     if len(q_no_punc) <= 12 and not (has_place and has_receiver and has_theme):
@@ -259,6 +273,63 @@ def user_has_explicit_name(user_query: str, generated_name: str = "") -> bool:
     return any(name in q for name in COMMON_NAME_KEYWORDS)
 
 
+def extract_sender_name_from_query(user_query: str) -> str:
+    """从用户输入中抽取显式寄批人姓名。
+
+    用于修复 v3 测试中“大牛/阿顺/炳辉”等被后处理改成“某某”的问题。
+    只做轻量规则，不追求覆盖所有中文姓名。
+    """
+    q = user_query or ""
+
+    patterns = [
+        r"([阿][\u4e00-\u9fa5]{1,2})从",
+        r"([阿][\u4e00-\u9fa5]{1,2})在",
+        r"([阿][\u4e00-\u9fa5]{1,2})寄",
+        r"([阿][\u4e00-\u9fa5]{1,2})写",
+        r"([阿][\u4e00-\u9fa5]{1,2})给",
+        r"([\u4e00-\u9fa5]{2,3})从",
+        r"([\u4e00-\u9fa5]{2,3})在",
+        r"([\u4e00-\u9fa5]{2,3})寄",
+    ]
+
+    stop_words = {
+        "我想", "帮我", "请帮", "生成", "写一封", "母亲", "父亲", "父母",
+        "妻子", "兄长", "叔父", "祖父", "祖母", "朋友", "家里", "家中",
+        "新加坡", "槟城", "曼谷", "汕头", "澄海", "潮州",
+    }
+
+    for pat in patterns:
+        m = re.search(pat, q)
+        if m:
+            name = m.group(1)
+            if name not in stop_words and not any(sw in name for sw in stop_words):
+                return name
+
+    return ""
+
+
+def clean_metadata_schema(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """过滤模型偶尔生成的额外解释字段，使输出 schema 更稳定。"""
+    allowed = {
+        "sender_name",
+        "sender_place_modern",
+        "sender_place_old",
+        "sender_role_modern",
+        "sender_role_old",
+        "receiver_place_modern",
+        "receiver_place_old",
+        "receiver_role_modern",
+        "receiver_role_old",
+        "relationship",
+        "amount_modern",
+        "amount_old",
+        "amount_value",
+        "tags",
+        "extra_tags",
+    }
+    return {k: v for k, v in metadata.items() if k in allowed}
+
+
 def query_has_explicit_receiver_role(user_query: str) -> bool:
     """判断用户是否明确指定了收件人身份。"""
     q = user_query or ""
@@ -326,49 +397,78 @@ def add_tag(tags: List[str], tag: str):
 def infer_tags_from_text(tags: List[str], user_query: str, body_text: str) -> List[str]:
     """
     依据用户输入和正文补齐必要 tags。
-    注意：第一版要避免“过度打标签”，所以弱标签主要看 user_query；
-    body_text 只用于补寄款/家用/问候这类强信号。
+    v3 重点补强：
+    - 生病问候：腰痛、眼疾、咳嗽、牙痛、腿痛、气喘、服药等。
+    - 节庆问候：贺寿、寿辰、冬节、春节、中秋等。
+    - 工作谋生/说明近况仍然保持谨慎，只在用户明确提到时补。
     """
     tags = [t for t in tags if t in FIXED_TAGS]
     user = user_query or ""
     body = body_text or ""
     joined = f"{user} {body}"
 
-    # 强信号：只要有金额/寄款表达，补寄款。
-    if any(k in joined for k in ["寄", "寄上", "汇", "银", "元", "奉上"]):
+    # 强信号：寄款
+    if any(k in joined for k in ["寄", "寄上", "汇", "汇上", "银", "元", "奉上", "托带"]):
         add_tag(tags, "寄款")
 
-    # 强信号：家用、买米、柴米、日用。
-    if any(k in joined for k in ["家用", "买米", "柴米", "日用", "补家"]):
+    # 强信号：家用
+    if any(k in joined for k in ["家用", "买米", "柴米", "日用", "帮贴", "帮补", "作家用"]):
         add_tag(tags, "家用")
 
-    # 强信号：报平安。
-    if any(k in joined for k in ["报平安", "平安", "安好", "身体", "粗安", "一切如常"]):
+    # 强信号：报平安
+    if any(k in joined for k in ["报平安", "平安", "安好", "身体", "粗安", "尚健", "一切如常", "一切顺遂"]):
         add_tag(tags, "报平安")
 
-    # 问候父母。
-    if any(k in joined for k in ["保重", "母亲年迈", "母亲年事", "父亲年事", "严亲", "慈亲"]):
+    # 问候父母
+    if any(k in joined for k in ["母亲", "父亲", "双亲", "严亲", "慈亲", "保重"]):
         add_tag(tags, "问候父母")
 
-    # 思亲：尽量要求明确表达挂念/思念，避免所有家书都标。
-    if any(k in joined for k in ["挂念", "思念", "甚念", "勿念", "勿悬念"]):
+    # v3 新增：生病问候
+    if any(k in joined for k in [
+        "病", "痛", "腰痛", "眼疾", "咳嗽", "咳症", "气喘", "头晕",
+        "牙痛", "腿痛", "服药", "买药", "医药", "全愈", "愈否",
+        "调治", "染恙", "微恙", "旧疾", "痧症"
+    ]):
+        add_tag(tags, "生病问候")
+
+    # v3 新增：节庆问候
+    if any(k in joined for k in [
+        "贺寿", "寿辰", "寿诞", "祝寿", "寿敬", "冬节", "春节",
+        "中秋", "新年", "节庆", "寒衣"
+    ]):
+        add_tag(tags, "节庆问候")
+
+    # 思亲：要求明确挂念/思念表达
+    if any(k in joined for k in ["挂念", "思念", "甚念", "悬念", "勿念", "勿悬念", "远念", "孝思"]):
         add_tag(tags, "思亲")
 
-    # 以下两个标签容易被模型因“橡胶园/近来”误触发，必须用户输入有明确主题才补。
-    if any(k in user for k in ["工作", "做工", "工钱", "谋生", "工厂", "胶园", "橡胶园", "失业", "停工"]):
-        add_tag(tags, "工作谋生")
+    # 问候家中
+    if any(k in joined for k in ["家中大小", "子女", "弟妹", "家中均安", "家中可好"]):
+        add_tag(tags, "问候家中")
 
-    if any(k in user for k in ["近况", "说明近况", "失业", "停工", "工钱减少", "生意", "做工"]):
-        add_tag(tags, "说明近况")
+    # 债务
+    if any(k in joined for k in ["还债", "旧债", "欠", "偿还", "代垫"]):
+        add_tag(tags, "债务")
 
-    if any(k in joined for k in ["再寄", "补寄", "下月再补", "当即多寄"]):
+    # 劝学
+    if any(k in joined for k in ["读书", "学费", "劝学", "用功", "夜学", "识字"]):
+        add_tag(tags, "劝学")
+
+    # 承诺再寄
+    if any(k in joined for k in ["再寄", "补寄", "下月再补", "当即多寄", "月内当再寄", "得工多寄"]):
         add_tag(tags, "承诺再寄")
 
-    # 如果用户没有提工作/近况，但模型生成 body_text 时自己写了橡胶园/做工，不要保留这两个弱标签。
-    if not any(k in user for k in ["工作", "做工", "工钱", "谋生", "工厂", "胶园", "橡胶园", "失业", "停工", "近况"]):
+    # 工作谋生 / 说明近况：避免因为模型自己写“杂货店帮工”而过度打标签。
+    if any(k in user for k in ["工作", "做工", "工钱", "谋生", "工厂", "胶园", "橡胶园", "失业", "停工", "洋行", "码头", "米行"]):
+        add_tag(tags, "工作谋生")
+
+    if any(k in user for k in ["近况", "说明近况", "失业", "停工", "工钱减少", "生意", "做工", "米市", "胶价"]):
+        add_tag(tags, "说明近况")
+
+    if not any(k in user for k in ["工作", "做工", "工钱", "谋生", "工厂", "胶园", "橡胶园", "失业", "停工", "近况", "洋行", "码头", "米行"]):
         tags = [t for t in tags if t not in {"工作谋生", "说明近况"}]
 
-    # extra_tags 才放细节，核心 tags 去重保序。
+    # 去重保序
     seen = set()
     cleaned = []
     for t in tags:
@@ -376,8 +476,6 @@ def infer_tags_from_text(tags: List[str], user_query: str, body_text: str) -> Li
             cleaned.append(t)
             seen.add(t)
     return cleaned
-
-
 
 
 def generate_cover_fields(result: Dict[str, Any]) -> Dict[str, str]:
@@ -421,11 +519,28 @@ def postprocess_generate_result(result: Dict[str, Any], user_query: str) -> Dict
     metadata = result.setdefault("metadata", {})
     body_fields = result.setdefault("body_fields", {})
 
-    # 修复用户未提供姓名时模型乱编姓名。
+    # 修复 sender_name：
+    # 1. 如果用户输入显式包含姓名，则优先使用该姓名；
+    # 2. 如果用户没有提供姓名，则统一使用“某某”，不要让模型随机编。
+    explicit_name = extract_sender_name_from_query(user_query)
     generated_name = norm_text(metadata.get("sender_name", ""))
-    if not user_has_explicit_name(user_query, generated_name):
+
+    if explicit_name:
+        old_name = generated_name
+        metadata["sender_name"] = explicit_name
+
+        # 同步修复正文和署名。
+        for key in ["signature", "body_text"]:
+            if key in body_fields and isinstance(body_fields[key], str):
+                if old_name and old_name != explicit_name:
+                    body_fields[key] = body_fields[key].replace(old_name, explicit_name)
+
+        sender_role_old = metadata.get("sender_role_old", "")
+        if sender_role_old:
+            body_fields["signature"] = f"{sender_role_old}{explicit_name}"
+
+    else:
         if generated_name:
-            # 替换 signature/body_text 中的姓名。
             for key in ["signature", "body_text"]:
                 if key in body_fields and isinstance(body_fields[key], str):
                     body_fields[key] = body_fields[key].replace(generated_name, "某某")
@@ -455,6 +570,10 @@ def postprocess_generate_result(result: Dict[str, Any], user_query: str) -> Dict
 
     # closing 默认值。
     body_fields.setdefault("closing", "专此奉闻，顺叩福安")
+
+    # 清理模型偶尔生成的非 schema 字段。
+    metadata = clean_metadata_schema(metadata)
+    result["metadata"] = metadata
 
     # 生成 cover_fields。
     result["cover_fields"] = generate_cover_fields(result)
